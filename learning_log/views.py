@@ -1,12 +1,11 @@
-from django.shortcuts import render
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from .models import Record
 from .serializers import RecordSerializer
-from django.db import IntegrityError, transaction
-
-# Create your views here.
+from django.db import IntegrityError, transaction, connection
+from pathlib import Path
+from django.utils.dateparse import parse_datetime
+from datetime import datetime, timedelta, timezone
 
 class RecordCreateView(APIView):
     def post(self, request):
@@ -28,17 +27,78 @@ class RecordCreateView(APIView):
 
 class UserSummaryView(APIView):
     def get(self, request, user_id):
+        params = request.GET
 
-        from_timestamp = request.query_params.get("from")
-        to_timestamp = request.query_params.get("to")
-        granularity = request.query_params.get("granularity")
+        from_timestamp = params.get("from")
+        to_timestamp = params.get("to")
+        granularity = params.get("granularity")
 
-        summary = {
+        # TODO: load from ENV or based on granularity
+        window_size = 3
+
+        if not from_timestamp or not to_timestamp:
+            return Response({"error": "'from' and 'to' are required"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            from_ts, tz_offset, tz_revert_offset = parse_iso8601_with_offset_and_revert_offset(from_timestamp)
+        except ValueError as e:
+            return Response({"error": "'from' is not iso8601 format"}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            to_ts, _, _ = parse_iso8601_with_offset_and_revert_offset(to_timestamp)
+        except ValueError as e:
+            return Response({"error": "'to' is not iso8601 format"}, status=status.HTTP_400_BAD_REQUEST)
+
+        if granularity not in ("hour", "day", "month"):
+            return Response({"error": "invalid granularity"}, status=status.HTTP_400_BAD_REQUEST)
+
+        sql_file = Path(__file__).resolve().parent / "sql/user_summary.sql"
+        sql = sql_file.read_text(encoding="utf-8")
+        query_params = {
             "user_id": user_id,
-            "total_study_time": 123,
-            "total_word_count": 456,
-            "from": from_timestamp,
-            "to": to_timestamp,
+            "from_ts": from_ts,
+            "to_ts": to_ts,
             "granularity": granularity,
+            "window_size": window_size,
+            "tz_revert_offset": tz_revert_offset,
         }
-        return Response(summary)
+
+        with connection.cursor() as cur:
+            cur.execute(sql, query_params)
+            rows = cur.fetchall()
+
+        summaries = [
+            {
+                "timestamp": attach_timezone(row[0], tz_offset),
+                "words_sma": row[3],
+                "time_sma": row[4],
+            } for row in rows
+        ]
+
+        return Response({"summaries": summaries}, status=status.HTTP_200_OK)
+
+def parse_iso8601_with_offset_and_revert_offset(s: str):
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+
+    dt = datetime.fromisoformat(s)
+
+    offset = dt.utcoffset()
+    sign = '+' if offset >= timedelta(0) else '-'
+    revert_sign = '-' if offset >= timedelta(0) else '+'
+    total_minutes = abs(int(offset.total_seconds() // 60))
+    hh, mm = divmod(total_minutes, 60)
+    offset_str = f"{sign}{hh:02d}:{mm:02d}"
+    revert_offset_str = f"{revert_sign}{hh:02d}:{mm:02d}"
+
+    return dt, offset_str, revert_offset_str
+
+def attach_timezone(dt: datetime, offset_str: str):
+    sign = 1 if offset_str[0] == '+' else -1
+    hours, minutes = map(int, offset_str[1:].split(':'))
+    offset = timedelta(hours=hours, minutes=minutes) * sign
+    tz = timezone(offset)
+
+    return dt.replace(tzinfo=tz)
+
+
