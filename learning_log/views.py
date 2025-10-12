@@ -25,3 +25,20 @@ class RecordCreateView(APIView):
             return Response(status=status.HTTP_201_CREATED)
         
         return Response(status=status.HTTP_201_CREATED)
+
+class UserSummaryView(APIView):
+    def get(self, request, user_id):
+
+        from_timestamp = request.query_params.get("from")
+        to_timestamp = request.query_params.get("to")
+        granularity = request.query_params.get("granularity")
+
+        summary = {
+            "user_id": user_id,
+            "total_study_time": 123,
+            "total_word_count": 456,
+            "from": from_timestamp,
+            "to": to_timestamp,
+            "granularity": granularity,
+        }
+        return Response(summary)

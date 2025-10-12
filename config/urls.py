@@ -21,4 +21,5 @@ from learning_log import views as learngin_log_views
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('records/', learngin_log_views.RecordCreateView.as_view(), name='post-learning-log'),
+    path("users/<uuid:user_id>/summary/", learngin_log_views.UserSummaryView.as_view(), name="user-summary"),
 ]
