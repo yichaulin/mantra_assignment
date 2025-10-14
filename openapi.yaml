@@ -1,0 +1,109 @@
+openapi: 3.1.0
+info:
+  title: Daily Aggregator
+  version: 1.0.0
+  description: |
+    - Logging learning records.
+    - Getting user summaries.
+
+paths:
+  /records/:
+    post:
+      summary: Create a learning log
+      parameters:
+        - name: X-User-Id
+          in: header
+          description: User UUID
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                study_timestamp:
+                  type: string
+                  format: date-time
+                word_count:
+                  type: integer
+                sutdy_time:
+                  type: integer
+                  description: in seconds
+                idempotency_key:
+                  type: string
+                  format: uuid
+              required: [study_timestamp, word_count, sutdy_tme, idempotency_key]
+      responses:
+        '201':
+          description: Learning log is created successfully.
+        '400':
+          description: Invalid parameters
+        '500':
+          description: Errors from server
+
+  /users/{user_id}/summary/:
+    get:
+      summary: Summaries users learning logs hourly/daily/monthly
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          description: User UUID
+          schema:
+            type: string
+            format: uuid
+        - name: from
+          in: query
+          description: Start time of summaries (iso8601)
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          description: End time of summaries (iso8601)
+          schema:
+            type: string
+            format: date-time
+        - name: granularity
+          in: query
+          schema:
+            type: string
+            enum: [hour, day, month]
+      responses:
+        '200':
+          description: Get summaries successfully.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  summaries:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SummaryItem'
+
+        '400':
+          description: Invalid parameters.
+        '500':
+          description: Errors from server.
+
+components:
+  schemas:
+    SummaryItem:
+      type: object
+      description: Aggregated summary
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+          description: Aggregated timestamp based on iso8601
+        word_sma:
+          type: number
+          description: Aggregated Simple Moving Average of word counts
+        time_sma:
+          type: number
+          description: Aggregated Simple Moving Average of study time
